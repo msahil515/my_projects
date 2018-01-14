@@ -1,0 +1,99 @@
+---
+title: "project_2"
+output: html_document
+---
+
+
+
+```{r}
+kc_house_data <- read.csv("~/Downloads/kc_house_data.csv", header=T)
+library(rpart)
+library(caret)
+library(ggplot2)
+library(GGally)
+library(dplyr)
+View(kc_house_data)
+```
+# Convert Date format for regression
+```{r}
+kc_house_data$date <- (substr(kc_house_data$date,1,8))
+kc_house_data$date <- ymd(kc_house_data$date)
+kc_house_data$date<-as.numeric(as.Date(kc_house_data$date, origin = "1900-01-01"))
+
+```
+
+## Checking Relationship between price, date,bedrooms, bathrooms, sqft_living and sqft lot
+```{r}
+plot1<- ggpairs(data=kc_house_data, columns=c(3,2,4:7),mapping = aes(color = "blue"),axisLabels="show")
+plot1
+```
+## Checking Relationship between price, floors, waterfront, view, condition,grade,sqft_above,sqft_basement,yr_built
+```{r}
+plot2<-ggpairs(data=kc_house_data, columns=c(3,8:15),mapping = aes(color = "blue"),axisLabels = "show")
+plot2
+```
+
+## Checking Relationship between price,yr_renovated,zipcode,lat,long,sqft_living15,sqft_lot15
+```{r}
+plot3<-ggpairs(data=kc_house_data, columns=c(3,15:21),mapping = aes(color = "blue"),axisLabels = "show")
+plot3
+
+```
+
+# Linear Regression
+```            {r  #Set up Cross validation} 
+library(caret)
+set.seed(100)
+indx <- createFolds(y=kc_house_data$price,k=10,returnTrain=TRUE)
+ctrl <- trainControl(method="cv",index=indx)
+```
+
+```{r}
+set.seed(100)
+lmTune0 <- train(x= kc_house_data[,-c(1,3)],y=kc_house_data$price,method="lm",trControl = ctrl)
+lmTune0
+summary(lmTune0)
+```
+
+
+
+## Recursive Partitioning
+```{r}
+set.seed(123)
+ctrl = trainControl(method="cv", number = 10)
+cartTune <- train(x= kc_house_data[,-c(1,3)],y=kc_house_data$price,method = "rpart",tuneLength = 25,trControl = ctrl)
+cartTune
+cartTune$finalModel
+plot(cartTune, scales = list(x = list(log = 10)))
+```
+
+
+
+# Ridge Regression
+
+```{r}
+ridgeGrid <- expand.grid(lambda = seq(0, 0.1, by = 0.005))
+set.seed(100)
+ridgeTune <- train(x= kc_house_data[,-c(1,3)],y=kc_house_data$price,method ="ridge",tuneGrid = ridgeGrid,trControl = ctrl,preProc = c("center", "scale"))
+ridgeTune
+print(update(plot(ridgeTune), xlab = "Penalty"))
+```
+
+## Principle Component Analysis
+
+```{r}
+set.seed(100)
+pcrTune <- train(x= kc_house_data[,-c(1,3)],y=kc_house_data$price,method = "pcr",tuneGrid = expand.grid(ncomp = 1:19),trControl = ctrl)
+pcrTune
+pcrImp <- varImp(pcrTune, scale = FALSE)
+plot(pcrImp, top = 10, scales = list(y = list(cex = .95)))
+```
+## Partial Least Squares
+
+```{r}
+set.seed(100)
+plsTune <- train(x= kc_house_data[,-c(1,3)],y=kc_house_data$price,method = "pls",tuneGrid = expand.grid(ncomp = 1:19),trControl = ctrl)
+plsTune
+plsImp <- varImp(plsTune, scale = FALSE)
+plot(plsImp, top = 10, scales = list(y = list(cex = .95)))
+```

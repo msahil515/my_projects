@@ -1,0 +1,93 @@
+---
+title: "project3"
+author: "Sahil"
+date: "4/15/2017"
+output: html_document
+---
+
+```{r}
+kc_house_data <- read.csv("~/Downloads/kc_house_data.csv", header=T)
+library(lubridate)
+library(rpart)
+library(caret)
+library(ggplot2)
+library(GGally)
+library(dplyr)
+```
+
+```{r}
+#changing the year of non-renovated house to the year built
+for (i in 1:nrow(kc_house_data)) {
+  if (kc_house_data$yr_renovated[i]==0) {
+    kc_house_data$yr_renovated[i]=kc_house_data$yr_built[i]
+  }
+}
+```
+
+```{r}
+#splitting the dataset into 20% test set and 80% training set
+ratio <- sample(1:nrow(kc_house_data),size=0.20*nrow(kc_house_data))
+kc_house_test <- kc_house_data[ratio,]
+kc_house_train <- kc_house_data[-ratio,]
+```
+
+
+
+```{r}
+#Random forest model
+library(randomForest)
+set.seed(7)
+start <- Sys.time()
+rf_kc_train <- randomForest(x=kc_house_train[,-c(1:3)],y=kc_house_train$price,data= kc_house_train,mtry=12,importance=T,scale=T)
+end <- Sys.time()
+timecost <- end - start
+print(timecost)
+# measuring the importance of predictors on the model
+importance(rf_kc_train)
+varImpPlot(rf_kc_train)
+
+```
+
+```{r}
+#calculating rmse of the test data set
+predictions <- floor(predict(rf_kc_train,kc_house_test))
+error=predictions-kc_house_test$price
+rmse <- sqrt(mean(error^2))
+rmse
+```
+
+```{r}
+# Comparing predicted prices and actual house prices 
+df1 <- data.frame(predictions,kc_house_test$price)
+colnames(df1) <- c("predicted_prices", "actual_prices")
+
+#Calculating accuracy rate
+error_percent <- ((abs(df1$predicted_prices-df1$actual_prices))/df1$actual_prices)*100
+accuracy_percent <- 100-error_percent
+df0<- cbind(df1,accuracy_percent)
+summary(accuracy_percent)
+```
+
+```{r}
+# % of predictions when the error was more than the actual house prices
+count=0
+for (i in 1:length(accuracy_percent)) {
+  if (accuracy_percent[i]< 0) {
+    count=count+1
+  }
+}
+count_percent <- (count/length(accuracy_percent))*100
+count_percent
+
+# % of predictions when accuracy rate was atleast 70%
+d1 <- df0[-which(accuracy_percent>=70 & accuracy_percent<=100),]
+ggplot(data=df0,aes(actual_prices,predicted_prices))+ geom_point()+geom_abline()
+(1-nrow(d1)/nrow(df0))*100
+
+# % of predictions when accuracy rate was atleast 80%
+d1 <- df0[-which(accuracy_percent>=80 & accuracy_percent<=100),]
+ggplot(data=df0,aes(actual_prices,predicted_prices))+ geom_point()+geom_abline()
+(1-nrow(d1)/nrow(df0))*100
+
+
+```

@@ -1,0 +1,206 @@
+---
+output:
+  pdf_document: default
+  word_document: default
+---
+
+###Load Libraries
+```{r eval=TRUE, message=FALSE, warning=FALSE}
+library('AppliedPredictiveModeling')
+library('caret')
+library('corrplot')
+library('dplyr')
+library('ggplot2')
+library('Lahman')
+library('nnet')
+library('partykit')
+library('rpart')
+library('stats')
+library('tidyr')
+```
+
+###Import and Pre-Process Data
+```{r eval=TRUE}
+predictors<-read.table("_predictors.csv",header=TRUE,sep=",",dec=".")
+responses<-read.table("_responses.csv",header=TRUE,sep=",",dec=".")
+predictors<-predictors[,1:105]
+responses<-responses[,1:105]
+#Replace all zero (failed) locations with large number.
+predictors[predictors==0]<-100
+predictors=predictors[,2:105]
+responses=responses[,2:105]
+```
+
+###Split into Training (80%) and Test (20%) Data
+```{r eval=TRUE}
+indices = sample(1:nrow(predictors), size=0.2*nrow(predictors))
+x.test = predictors[indices,]
+x.train = predictors[-indices,]
+y.test = responses[indices,]
+y.train = responses[-indices,]
+rm(indices, predictors, responses)
+```
+
+###Exploratory Data Analysis
+```{r eval=TRUE}
+corrplot(cor(y.train[,1:50]),order="hclust",tl.cex = 0.75,title="Correlation of Bolt Forces across Locations\n(Local Neighborhood of 50 Bolts)",mar = c(0,0,2,0))
+
+oneCol<-data.frame(c(y.train[,97],y.train[,98],y.train[,99],y.train[,100],
+                     y.train[,101],y.train[,102],y.train[,103],y.train[,104]))
+oneRow<-data.frame(c(y.train[,4],y.train[,12],y.train[,20],y.train[,28],y.train[,36],
+                     y.train[,44],y.train[,52],y.train[,60],y.train[,68],y.train[,76],
+                     y.train[,84],y.train[,92],y.train[,100]))
+
+ggplot(data=oneRow, aes(x=oneRow[,1]))+
+  geom_histogram()+
+  ggtitle("Range of Bolt Forces across One Row")+
+  xlab("Bolt FOrce")+
+  ylab("Count")+
+  theme(axis.title = element_text(face="bold",size = 18))+
+  theme(axis.text = element_text(face="bold",size=12))+
+  theme(plot.title = element_text(hjust = 0.5,face="bold",size = 20))
+
+ggplot(data=oneCol, aes(x=oneCol[,1]))+
+  geom_histogram()+
+  ggtitle("Range of Bolt Forces across One Column")+
+  xlab("Bolt FOrce")+
+  ylab("Count")+
+  theme(axis.title = element_text(face="bold",size = 18))+
+  theme(axis.text = element_text(face="bold",size=12))+
+  theme(plot.title = element_text(hjust = 0.5,face="bold",size = 20))
+
+rm(oneCol,oneRow)
+```
+
+###Linear Regression
+```{r, message=FALSE, warning=FALSE}
+ctrl=trainControl(method="cv", number=10)
+modelLinear<-train(x.train[], y.train[,44], method="lm", trControl = ctrl)
+
+predictLinear<-x.test
+predictLinear$predicted<-predict(modelLinear,predictLinear)
+predictLinear$observed<-data.frame(y.test[,44])
+
+ObsFit<-data.frame(predictLinear$observed,predictLinear$predicted)
+names(ObsFit) <- c("obs", "pred")
+modelstats=defaultSummary(ObsFit)
+RMSE=round(modelstats[1],2)
+Rsq=round(modelstats[2],2)
+
+ggplot(data=predictLinear, aes(x=observed,y=predicted))+
+  geom_point(alpha=0.1)+
+  geom_abline(intercept = 0,slope = 1)+
+  ggtitle("Multiple Linear Regression")+
+  xlim(0,13)+
+  ylim(0,13)+
+  xlab("ANSYS Bolt Force")+
+  ylab("Predicted")+
+  theme(axis.title = element_text(face="bold",size = 18))+
+  theme(axis.text = element_text(face="bold",size=12))+
+  theme(plot.title = element_text(hjust = 0.5,face="bold",size = 20))+
+  annotate("text",x=12,y=3,label = paste("R^2 =",Rsq),fontface=2,size=4)+
+  annotate("text",x=12,y=2,label = paste("RMSE =",RMSE),fontface=2,size=4)
+
+xyplot(resid(modelLinear) ~ predict(modelLinear),
+       type = c("p","g"),
+       xlab = "Predicted", ylab = "Residuals",
+       main = "Linear Model Residuals\n (This is not Normal)")
+
+coef<-as.data.frame(coef(modelLinear$finalModel))
+coefSignificant<-data.frame(summary(modelLinear)$coef[summary(modelLinear)$coef[,4] <= 0.05, 4])
+
+ggplot(data=coef, aes(x=coef(modelLinear$finalModel)))+
+  geom_histogram()+
+  ggtitle("Linear Model Coeficient Values")+
+  #xlim(-4,3)+
+  xlab("Coeficient Value")+
+  ylab("Count")+
+  theme(axis.title = element_text(face="bold",size = 18))+
+  theme(axis.text = element_text(face="bold",size=12))+
+  theme(plot.title = element_text(hjust = 0.5,face="bold",size = 20))+
+  annotate("text",x=2.65,y=25,label="Intercept",fontface=2,size=4)+
+  annotate("text",x=1.5,y=50,label="Immediately Adjacent\n (Left-Right)",fontface=2,size=4)+
+  annotate("text",x=-1.0,y=175,label="Vast Majority\n Insignificant",fontface=2,size=4)+
+  annotate("text",x=-3,y=25,label="Failed Bolt\n (Force ~ Zero)",fontface=2,size=4)
+```
+
+###K-Nearest Neighbors
+```{r eval=TRUE}
+ctrl=trainControl(method="cv", number=2)
+modelKNN<-train(x=x.train[1:10000,], y=y.train[1:10000,44], method="knn", preProc=c("center","scale"), tuneGrid=data.frame(.k=1:30), trControl=ctrl)
+print(modelKNN)
+plot(modelKNN)
+
+predictKNN<-x.test
+predictKNN$predicted<-predict(modelKNN,predictKNN)
+predictKNN$observed<-data.frame(y.test[,44])
+
+ObsFit<-data.frame(predictKNN$observed,predictKNN$predicted)
+names(ObsFit) <- c("obs", "pred")
+modelstats=defaultSummary(ObsFit)
+RMSE=round(modelstats[1],2)
+Rsq=round(modelstats[2],2)
+
+ggplot(data=predictKNN, aes(x=observed,y=predicted))+
+  geom_point(alpha=0.5)+
+  geom_abline(intercept = 0,slope = 1)+
+  ggtitle("K-Nearest Neighbors")+
+  xlim(0,13)+
+  ylim(0,13)+
+  xlab("ANSYS Bolt Force")+
+  ylab("Predicted")+
+  theme(axis.title = element_text(face="bold",size = 18))+
+  theme(axis.text = element_text(face="bold",size=12))+
+  theme(plot.title = element_text(hjust = 0.5,face="bold",size = 20))+
+  annotate("text",x=12,y=3,label = paste("R^2 =",Rsq),fontface=2,size=4)+
+  annotate("text",x=12,y=2,label = paste("RMSE =",RMSE),fontface=2,size=4)
+```
+
+###Kriging
+```{r eval=TRUE}
+library(sp)
+library(gstat)
+library(dplyr) # for "glimpse"
+library(ggplot2)
+library(scales) # for "comma"
+library(magrittr)
+library(gridExtra)
+
+for (i in 3:4){
+
+  krigSample<-read.table("_krigingData.csv",header=TRUE,sep=",",dec=".")
+  krigSample<-krigSample[,c(1,2,i)]
+  colnames(krigSample) <- c("x", "y", "force")
+  coordinates(krigSample) <- ~ x + y
+  class(krigSample)
+  
+  krigSample %>% as.data.frame %>% 
+    ggplot(aes(x, y)) + geom_point(aes(color=force,size=force)) +
+    scale_colour_gradient(low = "green", high = "red")+
+    ggtitle("Bolt Force at each Location") + coord_equal() 
+  
+  forces.vgm <- variogram(force~1, krigSample)
+  forces.fit <- fit.variogram(forces.vgm, model=vgm(1, "Ste", 1))
+  plot(forces.vgm,forces.fit)
+
+  Sr1 = Polygon(cbind(c(0,0,13,13),c(0,8,8,0)))
+  Srs1 = Polygons(list(Sr1), "s1")
+  SpP=SpatialPolygons(list(Srs1))
+  plate.grid=spsample(SpP,10000,"regular")
+  
+  plate.kriged <- krige(force ~ 1, krigSample, plate.grid, model=forces.fit)
+  
+  plot1 <- krigSample %>% as.data.frame %>% 
+    ggplot(aes(x, y)) + geom_point(aes(color=force),size=1) +
+    scale_colour_gradient(low = "green", high = "red")+
+    ggtitle("ANSYS Force at each Bolt Location") + coord_equal() 
+  
+  plot2 <- plate.kriged %>% as.data.frame %>%
+    ggplot(aes(x=x1, y=x2)) + geom_tile(aes(fill=var1.pred)) + coord_equal() +
+    scale_fill_gradient(low = "green", high="red") +
+    scale_x_continuous(labels=comma) + scale_y_continuous(labels=comma) +
+    theme_bw() + ggtitle("Krige-Interpolated Force across Plate")
+  
+  grid.arrange(plot1, plot2, ncol = 2)
+}
+```
